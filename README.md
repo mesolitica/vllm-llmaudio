@@ -44,13 +44,6 @@ vllm serve "mesolitica/Malaysian-Qwen2.5-7B-Audio-Instruct" --hf_overrides '{"ar
 import base64
 from openai import OpenAI
 
-def encode_base64_content_from_url(content_url: str) -> str:
-    with requests.get(content_url) as response:
-        response.raise_for_status()
-        result = base64.b64encode(response.content).decode('utf-8')
-
-    return result
-
 openai_api_key = "EMPTY"
 openai_api_base = "http://localhost:8001/v1"
 
