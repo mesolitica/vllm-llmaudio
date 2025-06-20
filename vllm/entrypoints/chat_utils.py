@@ -550,7 +550,7 @@ class BaseMultiModalItemTracker(ABC, Generic[_T]):
                 return "<|audio|>"
             if model_type == "phi4mm":
                 return f"<|audio_{current_count}|>"
-            if model_type in ("qwen2_audio", "qwen2_5_omni"):
+            if model_type in ("qwen2_audio", "qwen2_5_omni", "qwen2"):
                 return (f"Audio {current_count}: "
                         f"<|audio_bos|><|AUDIO|><|audio_eos|>")
             if model_type == "minicpmo":

@@ -28,12 +28,10 @@ from typing import Any, Optional, TypedDict, Union
 import torch
 import torch.nn as nn
 from transformers import BatchFeature
-from transformers.models.qwen2_audio import (Qwen2Config,
-                                             Qwen2AudioEncoder,
-                                             Qwen2AudioProcessor)
-from transformers import WhisperPreTrainedModel, WhisperConfig
+from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
+from transformers import WhisperPreTrainedModel, WhisperConfig, Qwen2Config
 from transformers.models.whisper import WhisperFeatureExtractor
-from transformers.modeling_outputs import BaseModelOutpu
+from transformers.modeling_outputs import BaseModelOutput
 
 from vllm.config import VllmConfig
 from vllm.model_executor.sampling_metadata import SamplingMetadata
@@ -51,6 +49,7 @@ from vllm.sequence import IntermediateTensors
 from .interfaces import MultiModalEmbeddings, SupportsMultiModal, SupportsPP
 from .utils import (AutoWeightsLoader, init_vllm_registered_model,
                     maybe_prefix, merge_multimodal_embeddings)
+from .llm_audio_processing import LLMAudioProcessor
 
 
 class WhisperEncoder(WhisperPreTrainedModel):
@@ -189,7 +188,7 @@ def _get_feat_extract_output_lengths(input_lengths: torch.Tensor):
     return feat_lengths, feat_lengths
 
 
-class Qwen2AudioProcessingInfo(BaseProcessingInfo):
+class LLMAudioProcessingInfo(BaseProcessingInfo):
 
     def get_hf_config(self):
         return self.ctx.get_hf_config(Qwen2Config)
@@ -201,7 +200,7 @@ class Qwen2AudioProcessingInfo(BaseProcessingInfo):
         sampling_rate: Optional[int] = None,
         **kwargs: object,
     ):
-        raise NotImplementedError
+        return self.ctx.get_hf_processor(LLMAudioProcessor, **kwargs)
 
     def get_feature_extractor(
         self,
@@ -209,7 +208,9 @@ class Qwen2AudioProcessingInfo(BaseProcessingInfo):
         # Ignored in initialization
         sampling_rate: Optional[int] = None,
     ) -> WhisperFeatureExtractor:
-        feature_extractor = WhisperFeatureExtractor.from_pretrained('mesolitica/Malaysian-Qwen2.5-7B-Speech-Instruct') 
+        hf_processor = self.get_hf_processor(sampling_rate=sampling_rate)
+        feature_extractor = hf_processor.feature_extractor  # type: ignore
+        assert isinstance(feature_extractor, WhisperFeatureExtractor)
         return feature_extractor
 
     def get_supported_mm_limits(self) -> Mapping[str, Optional[int]]:
@@ -243,7 +244,7 @@ class LLMAudioDummyInputsBuilder(
 
 
 class LLMAudioMultiModalProcessor(
-        BaseMultiModalProcessor[Qwen2AudioProcessingInfo]):
+        BaseMultiModalProcessor[LLMAudioProcessingInfo]):
 
     def _get_data_parser(self) -> MultiModalDataParser:
         feature_extractor = self.info.get_feature_extractor()
@@ -366,6 +367,7 @@ class LLMAudioForConditionalGeneration(nn.Module, SupportsMultiModal,
         self.language_model = init_vllm_registered_model(
             vllm_config=vllm_config,
             hf_config=config,
+            prefix=maybe_prefix(prefix, ""),
             architectures=["Qwen2ForCausalLM"],
         )
 
@@ -425,15 +427,20 @@ class LLMAudioForConditionalGeneration(nn.Module, SupportsMultiModal,
         audio_attention_mask_ = padding_mask.view(
             batch_size, 1, 1, max_seq_len).expand(batch_size, 1, max_seq_len,
                                                   max_seq_len)
+        
+        input_features = input_features.to(
+            dtype=self.encoder.conv1.weight.dtype,
+            device=self.encoder.conv1.weight.device)
         audio_attention_mask = audio_attention_mask_.to(
             dtype=self.encoder.conv1.weight.dtype,
             device=self.encoder.conv1.weight.device)
+        
         audio_attention_mask[audio_attention_mask_] = float("-inf")
 
         audio_outputs = self.encoder(input_features,
                                          attention_mask=audio_attention_mask)
         selected_audio_feature = audio_outputs.last_hidden_state
-        audio_features = self.multi_modal_projector(selected_audio_feature)
+        audio_features = self.projection(selected_audio_feature)
         num_audios, max_audio_tokens, embed_dim = audio_features.shape
         audio_output_lengths = audio_feat_lengths.unsqueeze(1)
         audio_features_mask = torch.arange(max_audio_tokens).expand(

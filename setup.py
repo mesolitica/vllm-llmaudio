@@ -286,7 +286,48 @@ class repackage_wheel(build_ext):
 
     def get_base_commit_in_main_branch(self) -> str:
         # Force to use the nightly wheel. This is mainly used for CI testing.
-        return "b6553be1bc75f046b00046a4ad7576364d03c835"
+        if envs.VLLM_TEST_USE_PRECOMPILED_NIGHTLY_WHEEL:
+            return "nightly"
+
+        try:
+            # Get the latest commit hash of the upstream main branch.
+            resp_json = subprocess.check_output([
+                "curl", "-s",
+                "https://api.github.com/repos/vllm-project/vllm/commits/main"
+            ]).decode("utf-8")
+            upstream_main_commit = json.loads(resp_json)["sha"]
+
+            # Check if the upstream_main_commit exists in the local repo
+            try:
+                subprocess.check_output(
+                    ["git", "cat-file", "-e", f"{upstream_main_commit}"])
+            except subprocess.CalledProcessError:
+                # If not present, fetch it from the remote repository.
+                # Note that this does not update any local branches,
+                # but ensures that this commit ref and its history are
+                # available in our local repo.
+                subprocess.check_call([
+                    "git", "fetch", "https://github.com/vllm-project/vllm",
+                    "main"
+                ])
+
+            # Then get the commit hash of the current branch that is the same as
+            # the upstream main commit.
+            current_branch = subprocess.check_output(
+                ["git", "branch", "--show-current"]).decode("utf-8").strip()
+
+            base_commit = subprocess.check_output([
+                "git", "merge-base", f"{upstream_main_commit}", current_branch
+            ]).decode("utf-8").strip()
+            return base_commit
+        except ValueError as err:
+            raise ValueError(err) from None
+        except Exception as err:
+            logger.warning(
+                "Failed to get the base commit in the main branch. "
+                "Using the nightly wheel. The libraries in this "
+                "wheel may not be compatible with your dev branch: %s", err)
+            return "nightly"
 
     def run(self) -> None:
         assert _is_cuda(

@@ -17,6 +17,23 @@ Easy, fast, and cheap LLM serving for everyone
 
 ## Getting Started
 
+1. Install vLLM,
+
 ```bash
-VLLM_USE_PRECOMPILED=1 pip install -e . 
+wget https://wheels.vllm.ai/b6553be1bc75f046b00046a4ad7576364d03c835/vllm-1.0.0.dev-cp38-abi3-manylinux1_x86_64.whl
+export VLLM_USE_PRECOMPILED=1
+export VLLM_PRECOMPILED_WHEEL_LOCATION="vllm-1.0.0.dev-cp38-abi3-manylinux1_x86_64.whl"
+pip3 install -e .
+```
+
+Or if you wish to skip isolated build environment and dependencies,
+
+```bash
+pip3 install -e . --no-build-isolation --no-deps -v
+```
+
+2. Serve,
+
+```bash
+vllm serve "mesolitica/Malaysian-Qwen2.5-7B-Audio-Instruct" --hf_overrides '{"architectures": ["LLMAudioForConditionalGeneration"]}' --dtype float16
 ```

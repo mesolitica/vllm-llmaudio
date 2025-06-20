@@ -227,6 +227,9 @@ class AutoWeightsLoader:
         for child_prefix, child_weights in self._groupby_prefix(weights):
             prefix = self._get_qualname(base_prefix, child_prefix)
 
+            if 'range_max_source_positions' in prefix:
+                continue
+
             if child_prefix in child_modules:
                 if self._can_skip(prefix + "."):
                     logger.debug("Skipping module %s", prefix)
